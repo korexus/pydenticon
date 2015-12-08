@@ -10,6 +10,10 @@ from PIL import Image, ImageDraw
 # For decoding hex values (works both for Python 2.7.x and Python 3.x).
 import binascii
 
+SYMMETRY_NONE = 0
+SYMMETRY_VERTICAL = 1
+SYMMETRY_HORIZONTAL = 2
+SYMMETRY_ARBITRARY = 4
 
 class Generator(object):
     """
@@ -35,7 +39,7 @@ class Generator(object):
     optional padding.
     """
 
-    def __init__(self, rows, columns, digest=hashlib.md5, foreground=["#000000"], background=["#ffffff"]):
+    def __init__(self, rows, columns, digest=hashlib.md5, foreground=["#000000"], background=["#ffffff"], symmetry=SYMMETRY_VERTICAL):
         """
         Initialises an instance of identicon generator. The instance can be used
         for creating identicons with differing image formats, sizes, and with
@@ -54,7 +58,8 @@ class Generator(object):
           return a digest of passed data as a hex string. Default is
           hashlib.md5. Selection of the digest will limit the maximum values
           that can be set for rows and columns. Digest needs to be able to
-          generate (columns / 2 + columns % 2) * rows + 8 bits of entropy.
+          generate columns * rows + 8 bits of entropy, although symmetry can
+          reduce this requirement.
 
           foreground - List of colours which should be used for drawing the
           identicon. Each element should be a string of format supported by the
@@ -63,12 +68,27 @@ class Generator(object):
           background - List of colours which should be used for background and
           padding, represented as a string of format supported by the
           PIL.ImageColor module. Default is ["#ffffff"] (only white).
+
+          symmetry - Bitwise combination of SYMMETRY_NONE (No symmetry in the image),
+          SYMMETRY_VERTICAL (vertical symmetry in the image (default)),
+          SYMMETRY_HORIZONTAL (horizontal symmetry in the immage)
+          or SYMMETRY_ARBITRARY (SYMMETRY_VERTICAL, SYMMETRY_HORIZONTAL or both).
         """
+
+        self.symmetry = symmetry
+        if symmetry & SYMMETRY_VERTICAL:
+            self.required_columns = columns // 2 + columns % 2
+        else:
+            self.required_columns = columns
+        if symmetry & SYMMETRY_HORIZONTAL:
+            self.required_rows = rows // 2 + rows % 2
+        else:
+            self.required_rows = rows
 
         # Check if the digest produces sufficient entropy for identicon
         # generation.
         entropy_provided = len(digest(b"test").hexdigest()) // 2 * 8
-        entropy_required = (columns // 2 + columns % 2) * rows + 8
+        entropy_required = self.required_columns * self.required_rows + 8
 
         if entropy_provided < entropy_required:
             raise ValueError("Passed digest '%s' is not capable of providing %d bits of entropy" % (str(digest), entropy_required))
@@ -105,7 +125,7 @@ class Generator(object):
 
         return False
 
-    def _generate_matrix(self, hash_bytes):
+    def _generate_matrix(self, hash_bytes, symmetry):
         """
         Generates matrix that describes which blocks should be coloured.
 
@@ -120,10 +140,9 @@ class Generator(object):
           should be used.
         """
 
-        # Since the identicon needs to be symmetric, we'll need to work on half
-        # the columns (rounded-up), and reflect where necessary.
-        half_columns = self.columns // 2 + self.columns % 2
-        cells = self.rows * half_columns
+        # When the identicon needs to be symmetric, we'll need to work on half
+        # the rows or columns (rounded-up), and reflect where necessary.
+        cells = self.rows * self.columns
 
         # Initialise the matrix (list of rows) that will be returned.
         matrix = [[False] * self.columns for _ in range(self.rows)]
@@ -134,16 +153,21 @@ class Generator(object):
             # If the bit from hash correpsonding to this cell is 1, mark the
             # cell as foreground one. Do not use first byte (since that one is
             # used for determining the foreground colour.
-            if self._get_bit(cell, hash_bytes[1:]):
+            truth = self._get_bit(cell, hash_bytes[1:])
 
-                # Determine the cell coordinates in matrix.
-                column = cell // self.columns
-                row = cell % self.rows
+            # Determine the cell coordinates in matrix.
+            column = cell // self.columns
+            row = cell % self.rows
 
-                # Mark the cell and its reflection. Central column may get
-                # marked twice, but we don't care.
-                matrix[row][column] = True
-                matrix[row][self.columns - column - 1] = True
+            # Mark the cell and its reflection. Cells may be marked
+            # multiple times, but never mind.
+            matrix[row][column] = truth
+            if symmetry & SYMMETRY_VERTICAL:
+                matrix[row][self.columns - column - 1] = truth
+            if symmetry & SYMMETRY_HORIZONTAL:
+                matrix[self.rows - row - 1][column] = truth
+            if symmetry & SYMMETRY_VERTICAL and symmetry & SYMMETRY_HORIZONTAL:
+                matrix[self.rows - row - 1][self.columns - column - 1] = truth
 
         return matrix
 
@@ -310,7 +334,16 @@ class Generator(object):
         digest_byte_list = self._data_to_digest_byte_list(data)
 
         # Create the matrix describing which block should be filled-in.
-        matrix = self._generate_matrix(digest_byte_list)
+        if self.symmetry == SYMMETRY_ARBITRARY:
+            symmetry = [
+              SYMMETRY_HORIZONTAL,
+              SYMMETRY_VERTICAL,
+              SYMMETRY_HORIZONTAL | SYMMETRY_VERTICAL,
+            ][digest_byte_list[0] % 3]
+        else:
+            symmetry = self.symmetry
+
+        matrix = self._generate_matrix(digest_byte_list, symmetry)
 
         # Determine the background and foreground colours.
         if output_format == "png":

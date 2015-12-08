@@ -35,7 +35,7 @@ class Generator(object):
     optional padding.
     """
 
-    def __init__(self, rows, columns, digest=hashlib.md5, foreground=["#000000"], background="#ffffff"):
+    def __init__(self, rows, columns, digest=hashlib.md5, foreground=["#000000"], background=["#ffffff"]):
         """
         Initialises an instance of identicon generator. The instance can be used
         for creating identicons with differing image formats, sizes, and with
@@ -60,9 +60,9 @@ class Generator(object):
           identicon. Each element should be a string of format supported by the
           PIL.ImageColor module. Default is ["#000000"] (only black).
 
-          background - Colour (single) which should be used for background and
+          background - List of colours which should be used for background and
           padding, represented as a string of format supported by the
-          PIL.ImageColor module. Default is "#ffffff" (white).
+          PIL.ImageColor module. Default is ["#ffffff"] (only white).
         """
 
         # Check if the digest produces sufficient entropy for identicon
@@ -81,7 +81,7 @@ class Generator(object):
         self.columns = columns
 
         self.foreground = foreground
-        self.background = background
+        self.background = background if isinstance('list', background) else [background]
 
         self.digest = digest
 
@@ -314,7 +314,7 @@ class Generator(object):
 
         # Determine the background and foreground colours.
         if output_format == "png":
-            background = self.background
+            background = self.background[digest_byte_list[-1] % len(self.background)]
             foreground = self.foreground[digest_byte_list[0] % len(self.foreground)]
         elif output_format == "ascii":
             foreground = "+"

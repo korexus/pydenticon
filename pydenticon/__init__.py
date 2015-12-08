@@ -81,7 +81,7 @@ class Generator(object):
         self.columns = columns
 
         self.foreground = foreground
-        self.background = background if isinstance('list', background) else [background]
+        self.background = background if isinstance(background, 'list') else [background]
 
         self.digest = digest
 
